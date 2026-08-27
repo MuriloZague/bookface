@@ -4,6 +4,7 @@ import 'screens/splash_screen.dart';
 import 'theme.dart';
 
 void main() {
+  
   runApp(const BookfaceApp());
 }
 
