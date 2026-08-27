@@ -18,7 +18,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
   bool _loading = false;
 
   @override
@@ -27,6 +29,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _phoneController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -117,9 +120,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       TextFormField(
                         controller: _passwordController,
                         obscureText: _obscurePassword,
-                        textInputAction: TextInputAction.done,
+                        textInputAction: TextInputAction.next,
                         validator: Validators.password,
-                        onFieldSubmitted: (_) => _onRegister(),
                         decoration: InputDecoration(
                           hintText: 'Senha',
                           suffixIcon: IconButton(
@@ -131,6 +133,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             onPressed: () => setState(
                               () => _obscurePassword = !_obscurePassword,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      TextFormField(
+                        controller: _confirmPasswordController,
+                        obscureText: _obscureConfirmPassword,
+                        textInputAction: TextInputAction.done,
+                        validator: (v) => Validators.confirmPassword(
+                          v,
+                          _passwordController.text,
+                        ),
+                        onFieldSubmitted: (_) => _onRegister(),
+                        decoration: InputDecoration(
+                          hintText: 'Confirmar senha',
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscureConfirmPassword
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                              color: AppColors.textSecondary,
+                            ),
+                            onPressed: () => setState(
+                              () => _obscureConfirmPassword =
+                                  !_obscureConfirmPassword,
                             ),
                           ),
                         ),
