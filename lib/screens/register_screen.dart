@@ -37,25 +37,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  Future<void> _onRegister() async {
+   void _onRegister() async {
     final isValid = _formKey.currentState?.validate() ?? false;
     if (!isValid) return;
-
+ 
     FocusScope.of(context).unfocus();
     setState(() => _loading = true);
-
+ 
     try {
       final newUser = UserModel(
         name: _nameController.text.trim(),
         phone: _phoneController.text.trim(),
         email: _emailController.text.trim(),
       );
-
+ 
       await _userService.createUser(
         user: newUser,
         password: _passwordController.text.trim(),
       );
-
+ 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -63,7 +63,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           backgroundColor: Colors.green,
         ),
       );
-
+ 
       Navigator.of(context).pop(); // Volta para a tela inicial/login
     } on FirebaseAuthException catch (e) {
       String message = 'Ocorreu um erro ao cadastrar.';
@@ -74,7 +74,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       } else if (e.code == 'invalid-email') {
         message = 'Informe um e-mail válido.';
       }
-
+ 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(message), backgroundColor: Colors.red),

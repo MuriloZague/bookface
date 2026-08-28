@@ -65,6 +65,10 @@ class UserService {
     });
   }
  
+  Future<void> signOut() async {
+    await _auth.signOut();
+  }
+
   Future<void> deleteAccount() async {
     User? currentUser = _auth.currentUser;
     if (currentUser == null) return;

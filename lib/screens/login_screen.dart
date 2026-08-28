@@ -1,7 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
 import '../utils/validators.dart';
+import 'dashboard_user.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -26,12 +28,71 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _onLogin() async {
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+ 
     FocusScope.of(context).unfocus();
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _loading = true);
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
-    if (!mounted) return;
-    setState(() => _loading = false);
+ 
+    setState(() {
+      _loading = true;
+    });
+ 
+    try {
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+ 
+      if (!mounted) return;
+ 
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const DashboardUser()),
+        (route) => false,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+ 
+      String message;
+ 
+      switch (e.code) {
+        case 'invalid-credential':
+          message = 'E-mail ou senha incorretos.';
+          break;
+        case 'user-not-found':
+          message = 'Usuário não encontrado.';
+          break;
+        case 'wrong-password':
+          message = 'Senha incorreta.';
+          break;
+        case 'invalid-email':
+          message = 'E-mail inválido.';
+          break;
+        case 'user-disabled':
+          message = 'Esta conta foi desativada.';
+          break;
+        case 'too-many-requests':
+          message = 'Muitas tentativas. Tente novamente mais tarde.';
+          break;
+        case 'network-request-failed':
+          message = 'Verifique sua conexão com a internet.';
+          break;
+        default:
+          message = 'Não foi possível realizar o login.';
+      }
+ 
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+        );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
   }
 
   @override
