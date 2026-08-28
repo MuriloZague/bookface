@@ -1,6 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../model/user_model.dart';
+import '../services/user_service.dart';
 import '../theme.dart';
 import '../utils/formatters.dart';
 import '../utils/validators.dart';
@@ -19,6 +22,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _userService = UserService();
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _loading = false;
@@ -34,18 +38,60 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _onRegister() async {
+    final isValid = _formKey.currentState?.validate() ?? false;
+    if (!isValid) return;
+
     FocusScope.of(context).unfocus();
-    if (!_formKey.currentState!.validate()) return;
-
     setState(() => _loading = true);
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
-    if (!mounted) return;
-    setState(() => _loading = false);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Conta criada com sucesso!')),
-    );
-    Navigator.of(context).pop();
+    try {
+      final newUser = UserModel(
+        name: _nameController.text.trim(),
+        phone: _phoneController.text.trim(),
+        email: _emailController.text.trim(),
+      );
+
+      await _userService.createUser(
+        user: newUser,
+        password: _passwordController.text.trim(),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Conta criada com sucesso!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      Navigator.of(context).pop(); // Volta para a tela inicial/login
+    } on FirebaseAuthException catch (e) {
+      String message = 'Ocorreu um erro ao cadastrar.';
+      if (e.code == 'email-already-in-use') {
+        message = 'Este e-mail já está cadastrado.';
+      } else if (e.code == 'weak-password') {
+        message = 'A senha informada é muito fraca.';
+      } else if (e.code == 'invalid-email') {
+        message = 'Informe um e-mail válido.';
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro inesperado: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
