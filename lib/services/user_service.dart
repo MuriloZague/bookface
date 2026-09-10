@@ -57,12 +57,57 @@ class UserService {
   }) async {
     String? uid = _auth.currentUser?.uid;
     if (uid == null) throw Exception("Usuário não autenticado");
- 
+
     await _usersRef.doc(uid).update({
       'name': name,
       'phone': phone,
       'updatedAt': DateTime.now(),
     });
+  }
+
+  Future<bool> updateAccount({
+    required String name,
+    required String phone,
+    required String email,
+    String? newPassword,
+    String? currentPassword,
+  }) async {
+    final User? user = _auth.currentUser;
+    if (user == null) throw Exception("Usuário não autenticado");
+
+    final newEmail = email.trim();
+    final emailChanged = newEmail != (user.email ?? '');
+    final passwordChanged = newPassword != null && newPassword.isNotEmpty;
+
+    // Reautentica antes de mexer em e-mail/senha.
+    if (emailChanged || passwordChanged) {
+      if (currentPassword == null || currentPassword.isEmpty) {
+        throw Exception('Informe a senha atual para alterar e-mail ou senha');
+      }
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: currentPassword,
+      );
+      await user.reauthenticateWithCredential(credential);
+    }
+
+    if (passwordChanged) {
+      await user.updatePassword(newPassword);
+    }
+
+    // Dados que refletem imediatamente no Firestore (e-mail só após confirmar).
+    await _usersRef.doc(user.uid).update({
+      'name': name,
+      'phone': phone,
+      'updatedAt': DateTime.now(),
+    });
+
+    if (emailChanged) {
+      await user.verifyBeforeUpdateEmail(newEmail);
+      return true;
+    }
+
+    return false;
   }
  
   Future<void> signOut() async {

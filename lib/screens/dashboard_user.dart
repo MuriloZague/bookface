@@ -1,8 +1,12 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../model/user_model.dart';
 import '../services/user_service.dart';
 import '../theme.dart';
+import '../utils/formatters.dart';
+import '../utils/validators.dart';
+import 'home_screen.dart';
 import 'login_screen.dart';
 
 /// Tela inicial do usuário logado (dashboard).
@@ -49,6 +53,30 @@ class _DashboardUserState extends State<DashboardUser> {
     );
   }
 
+  Future<void> _onEditProfile(UserModel user) async {
+    final result = await showModalBottomSheet<Object>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => _EditProfileSheet(
+        user: user,
+        userService: _userService,
+      ),
+    );
+
+    if (!mounted || result == null) return;
+
+    final message = result == 'email'
+        ? 'Perfil atualizado. Confira seu novo e-mail para confirmar a alteração.'
+        : 'Perfil atualizado com sucesso';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -57,13 +85,24 @@ class _DashboardUserState extends State<DashboardUser> {
         backgroundColor: AppColors.surface,
         elevation: 0.5,
         titleSpacing: 20,
-        title: Text(
-          'bookface',
-          style: TextStyle(
-            color: AppColors.primary,
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -1,
+        title: InkWell(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const HomeScreen()),
+            );
+          },
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Text(
+              'bookface',
+              style: TextStyle(
+                color: AppColors.primary,
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -1,
+              ),
+            ),
           ),
         ),
         actions: [
@@ -89,7 +128,10 @@ class _DashboardUserState extends State<DashboardUser> {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              _ProfileHeader(user: user),
+              _ProfileHeader(
+                user: user,
+                onEdit: user == null ? null : () => _onEditProfile(user),
+              ),
               const SizedBox(height: 16),
               const _StatsRow(),
               const SizedBox(height: 16),
@@ -106,9 +148,10 @@ class _DashboardUserState extends State<DashboardUser> {
 
 /// Cartão de topo com avatar (inicial do nome), nome e e-mail.
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader({required this.user});
+  const _ProfileHeader({required this.user, this.onEdit});
 
   final UserModel? user;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -138,13 +181,32 @@ class _ProfileHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                  ),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (user != null)
+                      IconButton(
+                        tooltip: 'Editar perfil',
+                        onPressed: onEdit,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.only(left: 6),
+                        constraints: const BoxConstraints(),
+                        icon: const Icon(
+                          Icons.edit_outlined,
+                          size: 20,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -163,7 +225,6 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
-/// Linha de estatísticas (placeholder — dados reais virão depois).
 class _StatsRow extends StatelessWidget {
   const _StatsRow();
 
@@ -332,6 +393,244 @@ class _FeedPlaceholder extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Formulário para editar nome e telefone do perfil, exibido em bottom sheet.
+class _EditProfileSheet extends StatefulWidget {
+  const _EditProfileSheet({required this.user, required this.userService});
+
+  final UserModel user;
+  final UserService userService;
+
+  @override
+  State<_EditProfileSheet> createState() => _EditProfileSheetState();
+}
+
+class _EditProfileSheetState extends State<_EditProfileSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameController;
+  late final TextEditingController _phoneController;
+  late final TextEditingController _emailController;
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  final _currentPasswordController = TextEditingController();
+  final bool _obscurePassword = true;
+  bool _obscureConfirm = true;
+  bool _obscureCurrent = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.user.name);
+    _phoneController = TextEditingController(text: widget.user.phone);
+    _emailController = TextEditingController(text: widget.user.email);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    _currentPasswordController.dispose();
+    super.dispose();
+  }
+
+  /// Precisa de reautenticação quando o e-mail muda ou uma nova senha é definida.
+  bool get _needsCurrentPassword {
+    final emailChanged = _emailController.text.trim() != widget.user.email;
+    return emailChanged || _passwordController.text.isNotEmpty;
+  }
+
+  Future<void> _onSave() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _saving = true);
+    try {
+      final newPassword = _passwordController.text;
+      final emailVerificationPending =
+          await widget.userService.updateAccount(
+        name: _nameController.text.trim(),
+        phone: _phoneController.text.trim(),
+        email: _emailController.text.trim(),
+        newPassword: newPassword.isEmpty ? null : newPassword,
+        currentPassword: _currentPasswordController.text.isEmpty
+            ? null
+            : _currentPasswordController.text,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(emailVerificationPending ? 'email' : true);
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_authErrorMessage(e))),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível atualizar o perfil')),
+      );
+    }
+  }
+
+  String _authErrorMessage(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'Senha atual incorreta';
+      case 'email-already-in-use':
+        return 'Este e-mail já está em uso';
+      case 'invalid-email':
+        return 'E-mail inválido';
+      case 'requires-recent-login':
+        return 'Faça login novamente para alterar e-mail ou senha';
+      case 'weak-password':
+        return 'A nova senha é muito fraca';
+      default:
+        return 'Não foi possível atualizar o perfil';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+            const Text(
+              'Editar perfil',
+              style: TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextFormField(
+              controller: _nameController,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Nome',
+                prefixIcon: Icon(Icons.person_outline),
+              ),
+              validator: Validators.name,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              inputFormatters: [PhoneInputFormatter()],
+              decoration: const InputDecoration(
+                labelText: 'Telefone',
+                prefixIcon: Icon(Icons.phone_outlined),
+              ),
+              validator: Validators.phone,
+            ),
+            const SizedBox(height: 16),
+            
+          
+            const SizedBox(height: 16),
+            if (_passwordController.text.isNotEmpty)
+              TextFormField(
+                controller: _confirmPasswordController,
+                obscureText: _obscureConfirm,
+                decoration: InputDecoration(
+                  labelText: 'Confirmar nova senha',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureConfirm
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscureConfirm = !_obscureConfirm),
+                  ),
+                ),
+                validator: (value) => Validators.confirmPassword(
+                  value,
+                  _passwordController.text,
+                ),
+              ),
+            if (_passwordController.text.isNotEmpty)
+              const SizedBox(height: 16),
+            if (_needsCurrentPassword) ...[
+              TextFormField(
+                controller: _currentPasswordController,
+                obscureText: _obscureCurrent,
+                decoration: InputDecoration(
+                  labelText: 'Senha atual',
+                  helperText: 'Necessária para alterar e-mail ou senha',
+                  prefixIcon: const Icon(Icons.lock_person_outlined),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureCurrent
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscureCurrent = !_obscureCurrent),
+                  ),
+                ),
+                validator: (value) {
+                  if (!_needsCurrentPassword) return null;
+                  if ((value ?? '').isEmpty) return 'Informe sua senha atual';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _saving ? null : _onSave,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: _saving
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2.5,
+                        ),
+                      )
+                    : const Text(
+                        'Salvar',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+              ),
+            ),
+            ],
+          ),
+        ),
       ),
     );
   }
