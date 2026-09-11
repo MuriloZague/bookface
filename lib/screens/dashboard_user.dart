@@ -1,7 +1,13 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
+import '../model/post_model.dart';
 import '../model/user_model.dart';
+import '../services/post_service.dart';
 import '../services/user_service.dart';
 import '../theme.dart';
 import '../utils/formatters.dart';
@@ -22,6 +28,7 @@ class DashboardUser extends StatefulWidget {
 
 class _DashboardUserState extends State<DashboardUser> {
   final _userService = UserService();
+  final _postService = PostService();
 
   Future<void> _onLogout() async {
     final confirmed = await showDialog<bool>(
@@ -77,10 +84,86 @@ class _DashboardUserState extends State<DashboardUser> {
     );
   }
 
+  Future<void> _onCreatePost() async {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => _PostFormSheet(postService: _postService),
+    );
+
+    if (!mounted || result != true) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Publicação criada com sucesso')),
+    );
+  }
+
+  Future<void> _onEditPost(PostModel post) async {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => _PostFormSheet(postService: _postService, post: post),
+    );
+
+    if (!mounted || result != true) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Publicação atualizada com sucesso')),
+    );
+  }
+
+  Future<void> _onDeletePost(PostModel post) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Excluir publicação'),
+        content: const Text('Deseja realmente excluir esta publicação?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await _postService.deletePost(post);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Publicação excluída')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível excluir a publicação')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: AppColors.primary,
+        tooltip: 'Nova publicação',
+        onPressed: _onCreatePost,
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
       appBar: AppBar(
         backgroundColor: AppColors.surface,
         elevation: 0.5,
@@ -137,7 +220,11 @@ class _DashboardUserState extends State<DashboardUser> {
               const SizedBox(height: 16),
               if (user != null) _InfoCard(user: user),
               const SizedBox(height: 16),
-              const _FeedPlaceholder(),
+              _Feed(
+                postService: _postService,
+                onEdit: _onEditPost,
+                onDelete: _onDeletePost,
+              ),
             ],
           );
         },
@@ -370,26 +457,200 @@ class _InfoTile extends StatelessWidget {
   }
 }
 
-/// Área reservada para o feed — a ser implementada futuramente.
-class _FeedPlaceholder extends StatelessWidget {
-  const _FeedPlaceholder();
+/// Feed reativo de publicações, consumido de [PostService.streamPosts].
+class _Feed extends StatelessWidget {
+  const _Feed({
+    required this.postService,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final PostService postService;
+  final void Function(PostModel post) onEdit;
+  final void Function(PostModel post) onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<PostModel>>(
+      stream: postService.streamPosts(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(
+            padding: const EdgeInsets.symmetric(vertical: 48),
+            decoration: _cardDecoration,
+            child: const Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ),
+          );
+        }
+
+        final posts = snapshot.data ?? const [];
+        if (posts.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 20),
+            decoration: _cardDecoration,
+            child: Column(
+              children: const [
+                Icon(Icons.dynamic_feed_outlined,
+                    size: 48, color: AppColors.textSecondary),
+                SizedBox(height: 12),
+                Text(
+                  'Nenhuma publicação ainda',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final currentUid = FirebaseAuth.instance.currentUser?.uid;
+        return Column(
+          children: [
+            for (final post in posts) ...[
+              _PostCard(
+                post: post,
+                isOwner: post.authorId == currentUid,
+                onEdit: () => onEdit(post),
+                onDelete: () => onDelete(post),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Cartão que exibe uma publicação: imagem, nome, descrição e data.
+class _PostCard extends StatelessWidget {
+  const _PostCard({
+    required this.post,
+    required this.isOwner,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final PostModel post;
+  final bool isOwner;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  String get _autorNome =>
+      post.authorNome.trim().isNotEmpty ? post.authorNome : 'Usuário';
+
+  String get _autorInicial => _autorNome.substring(0, 1).toUpperCase();
+
+  String get _dataFormatada {
+    final d = post.data;
+    final dia = d.day.toString().padLeft(2, '0');
+    final mes = d.month.toString().padLeft(2, '0');
+    return '$dia/$mes/${d.year}';
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 20),
       decoration: _cardDecoration,
+      clipBehavior: Clip.antiAlias,
       child: Column(
-        children: const [
-          Icon(Icons.dynamic_feed_outlined,
-              size: 48, color: AppColors.textSecondary),
-          SizedBox(height: 12),
-          Text(
-            'Seu feed aparecerá aqui',
-            style: TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 15,
-              fontWeight: FontWeight.w500,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: AppColors.primary,
+                  child: Text(
+                    _autorInicial,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _autorNome,
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _dataFormatada,
+                        style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isOwner)
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert,
+                        color: AppColors.textSecondary),
+                    onSelected: (value) {
+                      if (value == 'editar') onEdit();
+                      if (value == 'excluir') onDelete();
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'editar', child: Text('Editar')),
+                      PopupMenuItem(value: 'excluir', child: Text('Excluir')),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Text(
+              post.nome,
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          if (post.imagemBase64.isNotEmpty)
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: Image.memory(
+                base64Decode(post.imagemBase64),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(
+                  color: AppColors.field,
+                  child: const Center(
+                    child: Icon(Icons.broken_image_outlined,
+                        color: AppColors.textSecondary, size: 40),
+                  ),
+                ),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Text(
+              post.descricao,
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 15,
+                height: 1.35,
+              ),
             ),
           ),
         ],
@@ -631,6 +892,248 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Formulário de criação/edição de publicação, exibido em bottom sheet.
+///
+/// Sem [post] funciona em modo criação (imagem obrigatória); com [post]
+/// funciona em modo edição (imagem opcional — mantém a atual se não trocar).
+class _PostFormSheet extends StatefulWidget {
+  const _PostFormSheet({required this.postService, this.post});
+
+  final PostService postService;
+  final PostModel? post;
+
+  @override
+  State<_PostFormSheet> createState() => _PostFormSheetState();
+}
+
+class _PostFormSheetState extends State<_PostFormSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nomeController;
+  late final TextEditingController _descricaoController;
+  Uint8List? _imagem;
+  bool _saving = false;
+
+  bool get _isEditing => widget.post != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _nomeController = TextEditingController(text: widget.post?.nome ?? '');
+    _descricaoController =
+        TextEditingController(text: widget.post?.descricao ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nomeController.dispose();
+    _descricaoController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    // Imagem vai em Base64 no documento do Firestore (limite ~1 MB), então
+    // reduzimos resolução/qualidade para caber com folga.
+    final XFile? picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 800,
+      imageQuality: 50,
+    );
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+    setState(() => _imagem = bytes);
+  }
+
+  Future<void> _onSave() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    if (!_isEditing && _imagem == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecione uma imagem para publicar')),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final nome = _nomeController.text.trim();
+      final descricao = _descricaoController.text.trim();
+
+      if (_isEditing) {
+        await widget.postService.updatePost(
+          widget.post!.id!,
+          nome: nome,
+          descricao: descricao,
+          novaImagem: _imagem,
+        );
+      } else {
+        await widget.postService.createPost(
+          nome: nome,
+          descricao: descricao,
+          imagem: _imagem!,
+        );
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível salvar a publicação')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currentBase64 = widget.post?.imagemBase64;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _isEditing ? 'Editar publicação' : 'Nova publicação',
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _nomeController,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Nome',
+                  prefixIcon: Icon(Icons.title_outlined),
+                ),
+                validator: (value) => (value == null || value.trim().isEmpty)
+                    ? 'Informe um nome para a publicação'
+                    : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _descricaoController,
+                textCapitalization: TextCapitalization.sentences,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Descrição',
+                  alignLabelWithHint: true,
+                  prefixIcon: Icon(Icons.notes_outlined),
+                ),
+                validator: (value) => (value == null || value.trim().isEmpty)
+                    ? 'Informe uma descrição'
+                    : null,
+              ),
+              const SizedBox(height: 16),
+              _ImagePickerField(
+                imagem: _imagem,
+                currentBase64: currentBase64,
+                onTap: _pickImage,
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _saving ? null : _onSave,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: _saving
+                      ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2.5,
+                          ),
+                        )
+                      : Text(
+                          _isEditing ? 'Salvar' : 'Publicar',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Campo de seleção de imagem com preview (novo arquivo ou imagem atual).
+class _ImagePickerField extends StatelessWidget {
+  const _ImagePickerField({
+    required this.imagem,
+    required this.currentBase64,
+    required this.onTap,
+  });
+
+  final Uint8List? imagem;
+  final String? currentBase64;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget content;
+    if (imagem != null) {
+      content = Image.memory(imagem!, fit: BoxFit.cover);
+    } else if (currentBase64 != null && currentBase64!.isNotEmpty) {
+      content = Image.memory(base64Decode(currentBase64!), fit: BoxFit.cover);
+    } else {
+      content = const Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.add_a_photo_outlined,
+              color: AppColors.textSecondary, size: 36),
+          SizedBox(height: 8),
+          Text(
+            'Selecionar imagem',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+          ),
+        ],
+      );
+    }
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        height: 180,
+        width: double.infinity,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: AppColors.field,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: content,
       ),
     );
   }
