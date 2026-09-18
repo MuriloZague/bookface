@@ -30,6 +30,12 @@ class _DashboardUserState extends State<DashboardUser> {
   final _userService = UserService();
   final _postService = PostService();
 
+  // Streams criados UMA vez. Recriar a cada build faz o StreamBuilder
+  // reassinar e reemitir em loop infinito (vazamento de memória).
+  late final Stream<UserModel?> _profileStream =
+      _userService.streamUserProfile();
+  late final Stream<List<PostModel>> _postsStream = _postService.streamPosts();
+
   Future<void> _onLogout() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -198,7 +204,7 @@ class _DashboardUserState extends State<DashboardUser> {
         ],
       ),
       body: StreamBuilder<UserModel?>(
-        stream: _userService.streamUserProfile(),
+        stream: _profileStream,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
@@ -221,7 +227,7 @@ class _DashboardUserState extends State<DashboardUser> {
               if (user != null) _InfoCard(user: user),
               const SizedBox(height: 16),
               _Feed(
-                postService: _postService,
+                stream: _postsStream,
                 onEdit: _onEditPost,
                 onDelete: _onDeletePost,
               ),
@@ -460,19 +466,19 @@ class _InfoTile extends StatelessWidget {
 /// Feed reativo de publicações, consumido de [PostService.streamPosts].
 class _Feed extends StatelessWidget {
   const _Feed({
-    required this.postService,
+    required this.stream,
     required this.onEdit,
     required this.onDelete,
   });
 
-  final PostService postService;
+  final Stream<List<PostModel>> stream;
   final void Function(PostModel post) onEdit;
   final void Function(PostModel post) onDelete;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<PostModel>>(
-      stream: postService.streamPosts(),
+      stream: stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Container(
@@ -544,7 +550,7 @@ class _PostCard extends StatelessWidget {
       post.authorNome.trim().isNotEmpty ? post.authorNome : 'Usuário';
 
   String get _autorInicial => _autorNome.substring(0, 1).toUpperCase();
-
+//dataslk
   String get _dataFormatada {
     final d = post.data;
     final dia = d.day.toString().padLeft(2, '0');
