@@ -7,11 +7,13 @@ import 'package:image_picker/image_picker.dart';
 
 import '../model/post_model.dart';
 import '../model/user_model.dart';
+import '../services/comment_service.dart';
 import '../services/post_service.dart';
 import '../services/user_service.dart';
 import '../theme.dart';
 import '../utils/formatters.dart';
 import '../utils/validators.dart';
+import 'comments_sheet.dart';
 import 'home_screen.dart';
 import 'login_screen.dart';
 
@@ -29,6 +31,7 @@ class DashboardUser extends StatefulWidget {
 class _DashboardUserState extends State<DashboardUser> {
   final _userService = UserService();
   final _postService = PostService();
+  final _commentService = CommentService();
 
   // Streams criados UMA vez. Recriar a cada build faz o StreamBuilder
   // reassinar e reemitir em loop infinito (vazamento de memória).
@@ -148,6 +151,9 @@ class _DashboardUserState extends State<DashboardUser> {
 
     try {
       await _postService.deletePost(post);
+      // Remove os comentários do post na MockAPI. Se falhar, o post já foi
+      // excluído e os comentários só ficam órfãos, então não avisamos erro.
+      _commentService.deleteByPost(post.id!).catchError((_) {});
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Publicação excluída')),
@@ -158,6 +164,18 @@ class _DashboardUserState extends State<DashboardUser> {
         const SnackBar(content: Text('Não foi possível excluir a publicação')),
       );
     }
+  }
+
+  Future<void> _onOpenComments(PostModel post) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => CommentsSheet(post: post),
+    );
   }
 
   @override
@@ -230,6 +248,7 @@ class _DashboardUserState extends State<DashboardUser> {
                 stream: _postsStream,
                 onEdit: _onEditPost,
                 onDelete: _onDeletePost,
+                onComment: _onOpenComments,
               ),
             ],
           );
@@ -469,11 +488,13 @@ class _Feed extends StatelessWidget {
     required this.stream,
     required this.onEdit,
     required this.onDelete,
+    required this.onComment,
   });
 
   final Stream<List<PostModel>> stream;
   final void Function(PostModel post) onEdit;
   final void Function(PostModel post) onDelete;
+  final void Function(PostModel post) onComment;
 
   @override
   Widget build(BuildContext context) {
@@ -522,6 +543,7 @@ class _Feed extends StatelessWidget {
                 isOwner: post.authorId == currentUid,
                 onEdit: () => onEdit(post),
                 onDelete: () => onDelete(post),
+                onComment: () => onComment(post),
               ),
               const SizedBox(height: 16),
             ],
@@ -539,12 +561,14 @@ class _PostCard extends StatelessWidget {
     required this.isOwner,
     required this.onEdit,
     required this.onDelete,
+    required this.onComment,
   });
 
   final PostModel post;
   final bool isOwner;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback onComment;
 
   String get _autorNome =>
       post.authorNome.trim().isNotEmpty ? post.authorNome : 'Usuário';
@@ -656,6 +680,23 @@ class _PostCard extends StatelessWidget {
                 color: AppColors.textPrimary,
                 fontSize: 15,
                 height: 1.35,
+              ),
+            ),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: onComment,
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.textSecondary,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: const RoundedRectangleBorder(),
+              ),
+              icon: const Icon(Icons.chat_bubble_outline, size: 20),
+              label: const Text(
+                'Comentários',
+                style: TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
           ),

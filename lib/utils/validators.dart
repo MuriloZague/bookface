@@ -48,6 +48,14 @@ class Validators {
     return null;
   }
 
+  /// Comentário: obrigatório e com no máximo 500 caracteres.
+  static String? comment(String? value) {
+    final v = value?.trim() ?? '';
+    if (v.isEmpty) return 'Escreva um comentário';
+    if (v.length > 500) return 'Máximo de 500 caracteres';
+    return null;
+  }
+
   /// Login: aceita e-mail OU telefone no mesmo campo.
   static String? emailOrPhone(String? value) {
     final v = value?.trim() ?? '';
