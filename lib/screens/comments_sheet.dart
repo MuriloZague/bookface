@@ -336,7 +336,7 @@ class _CommentTile extends StatelessWidget {
     final mes = d.month.toString().padLeft(2, '0');
     final hora = d.hour.toString().padLeft(2, '0');
     final min = d.minute.toString().padLeft(2, '0');
-    return '$dia/$mes/${d.year} $hora:$min';
+    return '$dia/$mes/${d.year} às $hora:$min';
   }
 
   @override
